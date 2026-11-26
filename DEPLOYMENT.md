@@ -105,3 +105,4 @@ Deploy `dep-dc3un2vf3r2c739p9240` từ commit `8c7e073`, trạng thái **Live** 
 - [Deployment dashboard](screenshots/dashboard.png)
 - [Service running](screenshots/running.png)
 - [Test results](screenshots/test.png)
+- [Render logs — log JSON của agent](screenshots/render-logs.png)
