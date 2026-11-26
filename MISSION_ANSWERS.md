@@ -164,12 +164,15 @@ $ curl -X POST http://localhost/ask -H "Content-Type: application/json" -d '{"qu
 
 > Lớp K5 deploy chính agent Part 6 (`06-lab-complete/`), xem [DEPLOYMENT.md](DEPLOYMENT.md).
 
-### Exercise 3.1: Railway
+### Nền tảng chính: Render (Exercise 3.2)
 
-- URL: _xem DEPLOYMENT.md_
-- Screenshot: [screenshots/dashboard.png](screenshots/dashboard.png), [screenshots/running.png](screenshots/running.png), [screenshots/test.png](screenshots/test.png)
+- **URL: https://day14-agent-43am.onrender.com** (Render Free, Singapore; agent Docker + Key Value Redis)
+- Tự kiểm CP6: `/health` **200**, `/ready` **200** (`{"status":"ready","redis":"ok"}`), `/ask` không key **401**, có key **200**; rate limit trên cloud trả 429 sau 10 request/phút; `check_production_ready.py --public-url` → ✅.
+- Screenshot: [screenshots/dashboard.png](screenshots/dashboard.png), [screenshots/running.png](screenshots/running.png), [screenshots/test.png](screenshots/test.png). Chi tiết: [DEPLOYMENT.md](DEPLOYMENT.md).
+- Railway (Exercise 3.1): đã viết `railway.toml` và đăng nhập CLI, nhưng `railway init` báo *"Your trial has expired. Please select a plan to continue using Railway"* (gói Free sau trial chỉ cho 1 project, tài khoản đã có 1 project khác), nên chọn Render làm nền tảng chính. Mục "nền tảng còn lại" làm bằng phần so sánh bên dưới.
+- Cách set biến môi trường trên cloud: `AGENT_API_KEY` sinh ngẫu nhiên và đặt bằng `render services create --env-var ...` (không có trong repo); `REDIS_URL` trỏ tới địa chỉ nội bộ của Key Value `redis://red-…:6379`; `PORT` do Render cấp (10000). Xem log bằng `render logs -r <service-id>`.
 
-### Exercise 3.2: So sánh `railway.toml` và `render.yaml`
+### So sánh `railway.toml` và `render.yaml`
 
 So sánh 2 file mình viết trong `06-lab-complete/`:
 
@@ -177,9 +180,10 @@ So sánh 2 file mình viết trong `06-lab-complete/`:
 |---|---|---|---|
 | Phạm vi | Chỉ cấu hình **build/deploy của 1 service** | **Blueprint toàn bộ hạ tầng**: web service + Key Value (Redis) trong cùng file | Railway tạo Redis bằng dashboard/CLI (`railway add`), Render cho khai báo nhiều service dạng Infrastructure-as-Code |
 | Định dạng | TOML, các bảng `[build]`, `[deploy]` | YAML, danh sách `services:` | Quy ước của từng nền tảng |
-| Build | `builder = "DOCKERFILE"`, `dockerfilePath` | `runtime: docker`, `dockerfilePath`, `dockerContext`, `rootDir: 06-lab-complete` | Railway deploy thư mục hiện tại bằng `railway up`; Render build từ GitHub repo nên phải chỉ thư mục con |
+| Build | `builder = "DOCKERFILE"`, `dockerfilePath` | `runtime: docker`, `dockerfilePath: ./06-lab-complete/Dockerfile`, `dockerContext: ./06-lab-complete`, `buildFilter` chỉ build lại khi `06-lab-complete/**` đổi | Railway upload thư mục hiện tại bằng `railway up`; Render build từ GitHub repo (đường dẫn tính từ gốc repo) nên phải chỉ rõ thư mục con và nên lọc để sửa file khác không trigger deploy |
 | Health check | `healthcheckPath = "/health"`, `healthcheckTimeout = 60` | `healthCheckPath: /health` | Cùng ý tưởng, khác tên khoá |
-| Biến môi trường / secret | Không có trong file; đặt bằng `railway variables set AGENT_API_KEY=...` | Khai báo trong file: giá trị thường ghi thẳng, secret dùng `sync: false` (nhập trên dashboard), `REDIS_URL` lấy bằng `fromService ... property: connectionString` | Render cần biết trước danh sách biến để hỏi khi tạo Blueprint, và tự nối URL Redis giữa các service |
+| Biến môi trường / secret | Không có trong file; đặt bằng `railway variables --set AGENT_API_KEY=...` | Khai báo trong file: giá trị thường ghi thẳng, secret `AGENT_API_KEY` dùng `generateValue: true` (Render tự sinh, không có trong repo), `REDIS_URL` lấy bằng `fromService ... property: connectionString` | Render cần biết trước danh sách biến khi tạo Blueprint, và tự nối URL Redis giữa các service |
+| Region / plan | Chọn trên dashboard | `plan: free`, `region: singapore` ghi trong file | Blueprint là IaC nên ghi cả cấu hình hạ tầng |
 | Restart | `restartPolicyType = "ON_FAILURE"`, tối đa 3 lần | Render tự quản lý | Railway cho chỉnh chính sách restart |
 | Port | Railway cấp `PORT`, Dockerfile đọc `${PORT:-8000}` | Render cũng cấp `PORT`, dùng chung Dockerfile | Cùng một image chạy được trên cả hai nhờ đọc port từ env |
 
@@ -483,4 +487,5 @@ Theo [RULES.md](RULES.md) mục 1: bài này có dùng AI (Claude Code, chạy t
 | 4 | Trả lời câu hỏi Part 1–5 | Soạn câu trả lời dựa trên code mẫu và output thật; chỉ ra 2 lỗi nhỏ của code mẫu Part 1 (log JSON bị nuốt vì `basicConfig` gọi 2 lần; handler SIGTERM bị uvicorn đè) | Kiểm tra lại trong log `p1_prod` (dòng `WARNING:root:` và không có log JSON) |
 | 5 | Part 7: load test, eval, sửa knowledge base, CI job | Chạy `load_test.py` 4 mức concurrency và 3 mức `MOCK_SLOW_RATE`, chạy eval v1/v2, thêm 2 tài liệu (JWT, Kubernetes HPA) vào `KNOWLEDGE_BASE`, viết `.github/workflows/eval.yml`; thêm metric `agent_question_length_chars` | Kiểm tra từ khoá mới chỉ khớp đúng 2 câu sai (grep golden dataset) để không gây regression; eval cuối **23/23, 0 regression, Quality gate PASS** |
 | 6 | Part 7 stack production | Phát hiện Dockerfile của stack observability crash (`No module named 'uvicorn'`) do user `agent` có home `/app` → thêm `ENV PYTHONUSERBASE`; phát hiện `docker compose run locust` tự bật lại 2 agent nên chạy benchmark scale với `--no-deps`; chụp screenshot bằng Chrome headless | Kiểm tra số container agent trước mỗi lần chạy Locust; số trong BENCHMARK_REPORT lấy trực tiếp từ file JSON/CSV |
-| 7 | Viết `MISSION_ANSWERS.md`, `BENCHMARK_REPORT.md`, `DEPLOYMENT.md` | Soạn từ output và report đã chạy | Đối chiếu từng con số với file trong `reports/` và `benchmark-results/` |
+| 7 | Deploy agent Part 6 | Railway trial hết hạn → chuyển Render; AI sửa `render.yaml` (đường dẫn từ gốc repo, `generateValue`), validate bằng `render blueprints validate`, tạo Key Value và web service bằng Render CLI (mình tự đăng nhập CLI), sinh `AGENT_API_KEY` ngẫu nhiên lưu ngoài repo | 4 lệnh tự kiểm 200/200/401/200, `/ready` báo `redis: ok`, rate limit 429 trên cloud, `check_production_ready.py --public-url` ✅; log Render xác nhận `PORT=10000` |
+| 8 | Viết `MISSION_ANSWERS.md`, `BENCHMARK_REPORT.md`, `DEPLOYMENT.md` | Soạn từ output và report đã chạy | Đối chiếu từng con số với file trong `reports/` và `benchmark-results/` |

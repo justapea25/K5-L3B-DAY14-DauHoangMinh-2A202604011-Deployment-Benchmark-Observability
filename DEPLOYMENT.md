@@ -1,43 +1,53 @@
 # Deployment Information
 
-> Agent được deploy là agent Part 6 trong `06-lab-complete/` (đạt `PASS 12/12`), kèm một Redis trên cùng nền tảng.
+> Agent được deploy là agent Part 6 trong `06-lab-complete/` (đạt `PASS 12/12`), kèm một Render Key Value (Redis-compatible) cùng region.
 
 ## Public URL
 
-<!-- TODO: điền URL sau khi chạy `railway domain` -->
-https://<your-agent>.up.railway.app
+https://day14-agent-43am.onrender.com
 
 ## Platform
 
-Railway (build bằng `06-lab-complete/Dockerfile`, cấu hình trong `06-lab-complete/railway.toml`)
+**Render** (gói Free, region Singapore), build từ `06-lab-complete/Dockerfile`, cấu hình tương ứng `06-lab-complete/render.yaml`.
+
+> Lúc đầu định dùng Railway (`railway.toml` vẫn giữ trong repo), nhưng tài khoản Railway đã hết trial ("Your trial has expired. Please select a plan to continue using Railway") nên chuyển sang Render, theo RUBRIC chọn Railway hoặc Render đều được.
+>
+> Gói Free của Render cho web service ngủ sau ~15 phút không có traffic; request đầu tiên sau đó mất khoảng 30–60 giây để khởi động lại (cold start). Nếu lệnh test đầu tiên bị timeout, chờ một lúc rồi chạy lại.
 
 ## Cách deploy
 
+| Tài nguyên | Loại | Plan / region | ID |
+|---|---|---|---|
+| `day14-agent` | Web service, runtime Docker, root directory `06-lab-complete` | free / singapore | `srv-dc3un2nf3r2c739p91eg` |
+| `day14-redis` | Key Value (Redis 8.1), không mở ra internet | free / singapore | `red-dc3umqt6e07s73dlfkig` |
+
+Cách 1 — Blueprint (dashboard): New → Blueprint → chọn repo → Blueprint Path `06-lab-complete/render.yaml` → Apply. `render.yaml` đã qua `render blueprints validate` (`"valid": true`).
+
+Cách 2 — Render CLI (cách đã dùng thực tế):
+
 ```bash
-npm i -g @railway/cli
-railway login
-cd 06-lab-complete
-railway init                       # tạo project mới
-railway add --database redis       # tạo Redis trong cùng project
-railway up                         # tạo service agent từ Dockerfile
-# Đặt biến cho service agent (KHÔNG ghi giá trị thật vào repo):
-railway variables --set "AGENT_API_KEY=<random-key>" \
-                  --set 'REDIS_URL=${{Redis.REDIS_URL}}' \
-                  --set "ENVIRONMENT=production" \
-                  --set "RATE_LIMIT_PER_MINUTE=10" \
-                  --set "DAILY_BUDGET_USD=1.0" \
-                  --set "MONTHLY_BUDGET_USD=10.0"
-railway up                         # redeploy với biến mới
-railway domain                     # nhận public URL
+render login
+render workspace set <workspace-id>
+render kv create --name day14-redis --plan free --region singapore
+render services create --name day14-agent --type web_service --runtime docker \
+  --repo https://github.com/<user>/<repo> --branch main --root-directory 06-lab-complete \
+  --plan free --region singapore --health-check-path /health \
+  --build-filter-path '06-lab-complete/**' \
+  --build-filter-ignored-path '06-lab-complete/benchmark-observability/**' \
+  --env-var ENVIRONMENT=production \
+  --env-var AGENT_API_KEY=<random, sinh bằng openssl rand -hex 24> \
+  --env-var REDIS_URL=redis://<key-value-id>:6379 \
+  --env-var RATE_LIMIT_PER_MINUTE=10 --env-var DAILY_BUDGET_USD=1.0 --env-var MONTHLY_BUDGET_USD=10.0
 ```
 
-`PORT` do Railway tự cấp; `CMD` trong Dockerfile đọc `${PORT:-8000}`.
+`PORT` do Render tự cấp (10000); `CMD` trong Dockerfile đọc `${PORT:-8000}` nên không cần cấu hình.
 
 ## Test Commands
 
-Đặt `BASE` là URL public và `AGENT_API_KEY` là key đã đặt trên Railway. Mỗi lệnh chỉ in mã HTTP, chụp màn hình không lộ key.
+`BASE` là URL public, `AGENT_API_KEY` là key đã đặt trên Render (không ghi trong repo). Mỗi lệnh chỉ in mã HTTP nên chụp màn hình không lộ key.
 
 ```bash
+BASE=https://day14-agent-43am.onrender.com
 curl -sS -o /dev/null -w '%{http_code}\n' "$BASE/health"     # 200
 curl -sS -o /dev/null -w '%{http_code}\n' "$BASE/ready"      # 200
 curl -sS -o /dev/null -w '%{http_code}\n' -X POST "$BASE/ask" -H 'Content-Type: application/json' -d '{"question":"Hello"}'   # 401
@@ -47,27 +57,48 @@ curl -sS -o /dev/null -w '%{http_code}\n' -X POST "$BASE/ask" -H 'Content-Type: 
 Kết quả:
 
 ```text
-TODO: dán output 4 lệnh trên (mong đợi 200, 200, 401, 200)
+$ curl -sS -o /dev/null -w '%{http_code}\n' "$BASE/health"
+200
+$ curl -sS -o /dev/null -w '%{http_code}\n' "$BASE/ready"
+200
+$ curl -sS -o /dev/null -w '%{http_code}\n' -X POST "$BASE/ask" ... (không có key)
+401
+$ curl -sS -o /dev/null -w '%{http_code}\n' -X POST "$BASE/ask" ... -H "X-API-Key: $AGENT_API_KEY"
+200
+
+$ curl -s "$BASE/ready"
+{"status":"ready","redis":"ok"}
+$ curl -s -X POST "$BASE/ask" -H 'Content-Type: application/json' -H "X-API-Key: $AGENT_API_KEY" -d '{"question":"What is docker?"}'
+{"question":"What is docker?","answer":"Container là cách đóng gói app để chạy ở mọi nơi. Build once, run anywhere!"}
+
+# Rate limit trên cloud (RATE_LIMIT_PER_MINUTE=10, đã dùng 2 request ở trên):
+200 200 200 200 200 200 200 200 429 429 429 429
+
+$ python check_production_ready.py --static-only --public-url "$BASE" | grep "Public URL"
+     ✅ Public URL: GET https://day14-agent-43am.onrender.com/health → 200
 ```
 
-Kiểm tra thêm bằng script chấm:
+Log khởi động trên Render (`render logs`), mỗi dòng log của app là JSON:
 
-```bash
-cd 06-lab-complete && python check_production_ready.py --public-url "$BASE"
+```text
+{"ts": "2026-11-26T08:20:17.553373+00:00", "lvl": "INFO", "logger": "agent", "event": "startup", "environment": "production", "port": 10000, "redis_ok": true}
+INFO:     Uvicorn running on http://0.0.0.0:10000 (Press CTRL+C to quit)
 ```
+
+Deploy `dep-dc3un2vf3r2c739p9240` từ commit `8c7e073`, trạng thái **Live** (bắt đầu 08:19:23Z, xong 08:20:21Z).
 
 ## Environment Variables Set
 
-| Biến | Giá trị | Nguồn |
+| Biến | Giá trị | Ghi chú |
 |---|---|---|
-| `PORT` | do Railway cấp | Railway |
-| `AGENT_API_KEY` | (secret, không ghi ở đây) | `railway variables` |
-| `REDIS_URL` | `${{Redis.REDIS_URL}}` (tham chiếu tới service Redis) | `railway variables` |
-| `ENVIRONMENT` | `production` | `railway variables` |
-| `RATE_LIMIT_PER_MINUTE` | `10` | `railway variables` |
-| `DAILY_BUDGET_USD` | `1.0` | `railway variables` |
-| `MONTHLY_BUDGET_USD` | `10.0` | `railway variables` |
-| `LOG_LEVEL` | `INFO` (mặc định trong code) | — |
+| `PORT` | do Render cấp | không tự đặt |
+| `AGENT_API_KEY` | (secret, không ghi ở đây) | sinh ngẫu nhiên 48 ký tự hex |
+| `REDIS_URL` | `redis://red-dc3umqt6e07s73dlfkig:6379` | địa chỉ nội bộ của Key Value, chỉ truy cập được từ service Render cùng region |
+| `ENVIRONMENT` | `production` | |
+| `RATE_LIMIT_PER_MINUTE` | `10` | |
+| `DAILY_BUDGET_USD` | `1.0` | |
+| `MONTHLY_BUDGET_USD` | `10.0` | |
+| `LOG_LEVEL` | `INFO` | mặc định trong code |
 
 ## Screenshots
 
