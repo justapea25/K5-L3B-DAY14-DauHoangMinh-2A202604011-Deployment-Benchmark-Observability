@@ -1,22 +1,29 @@
 # ============================================================
-# Render Blueprint (tiêu chí 12) — thay thế cho railway.toml
-#   Agent (Docker web service) + Render Key Value (Redis-compatible).
-#   AGENT_API_KEY dùng `sync: false` → điền trên dashboard, không ghi giá trị ở đây.
+# Render Blueprint (tiêu chí 12) — agent (Docker) + Render Key Value (Redis-compatible)
+#   Tạo trên dashboard: New → Blueprint → chọn repo → Blueprint Path = 06-lab-complete/render.yaml
+#   Đường dẫn bên dưới tính từ GỐC repo (file này nằm trong thư mục con 06-lab-complete/).
+#   AGENT_API_KEY dùng `generateValue: true` → Render tự sinh key ngẫu nhiên, không ghi giá trị ở đây.
 # ============================================================
 services:
   - type: web
     name: day14-agent
     runtime: docker
     plan: free
-    rootDir: 06-lab-complete
-    dockerfilePath: ./Dockerfile
-    dockerContext: .
+    region: singapore
+    dockerfilePath: ./06-lab-complete/Dockerfile
+    dockerContext: ./06-lab-complete
     healthCheckPath: /health
+    autoDeploy: true
+    buildFilter:
+      paths:
+        - 06-lab-complete/**
+      ignoredPaths:
+        - 06-lab-complete/benchmark-observability/**
     envVars:
       - key: ENVIRONMENT
         value: production
       - key: AGENT_API_KEY
-        sync: false
+        generateValue: true
       - key: REDIS_URL
         fromService:
           type: keyvalue
@@ -32,4 +39,5 @@ services:
   - type: keyvalue
     name: day14-redis
     plan: free
-    ipAllowList: []   # chỉ cho phép kết nối nội bộ từ các service Render
+    region: singapore
+    ipAllowList: []   # không mở ra internet, chỉ service Render trong cùng tài khoản kết nối được
