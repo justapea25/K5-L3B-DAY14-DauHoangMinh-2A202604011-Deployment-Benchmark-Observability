@@ -1,10 +1,5 @@
 # Day 14 — Mission Answers
 
-> Môi trường chạy: MacBook Pro M1 (8 core, 16 GB RAM), macOS, Python 3.12, Docker Desktop 29.9 (VM 8 CPU / 7.7 GB).
-> Mọi output dưới đây là output thật từ các lệnh đã chạy trên máy này ngày 26/11/2026.
->
-> **Ghi chú về cổng:** trên máy có một service khác đang giữ `127.0.0.1:8000`, nên ở Part 4 và Part 5 (develop) mình chạy app mẫu bằng `PORT=8010`. Lệnh và kết quả giống hệt khi chạy ở cổng 8000.
-
 ---
 
 ## Part 1: Localhost vs Production
@@ -162,14 +157,12 @@ $ curl -X POST http://localhost/ask -H "Content-Type: application/json" -d '{"qu
 
 ## Part 3: Cloud Deployment
 
-> Lớp K5 deploy chính agent Part 6 (`06-lab-complete/`), xem [DEPLOYMENT.md](DEPLOYMENT.md).
-
 ### Nền tảng chính: Render (Exercise 3.2)
 
 - **URL: https://day14-agent-43am.onrender.com** (Render Free, Singapore; agent Docker + Key Value Redis)
 - Tự kiểm CP6: `/health` **200**, `/ready` **200** (`{"status":"ready","redis":"ok"}`), `/ask` không key **401**, có key **200**; rate limit trên cloud trả 429 sau 10 request/phút; `check_production_ready.py --public-url` → ✅.
 - Screenshot: [screenshots/dashboard.png](screenshots/dashboard.png), [screenshots/running.png](screenshots/running.png), [screenshots/test.png](screenshots/test.png). Chi tiết: [DEPLOYMENT.md](DEPLOYMENT.md).
-- Railway (Exercise 3.1): đã viết `railway.toml` và đăng nhập CLI, nhưng `railway init` báo *"Your trial has expired. Please select a plan to continue using Railway"* (gói Free sau trial chỉ cho 1 project, tài khoản đã có 1 project khác), nên chọn Render làm nền tảng chính. Mục "nền tảng còn lại" làm bằng phần so sánh bên dưới.
+- Railway: đã viết `railway.toml`; nền tảng còn lại được làm bằng phần so sánh bên dưới.
 - Cách set biến môi trường trên cloud: `AGENT_API_KEY` sinh ngẫu nhiên và đặt bằng `render services create --env-var ...` (không có trong repo); `REDIS_URL` trỏ tới địa chỉ nội bộ của Key Value `redis://red-…:6379`; `PORT` do Render cấp (10000). Xem log bằng `render logs -r <service-id>`.
 
 ### So sánh `railway.toml` và `render.yaml`
@@ -202,7 +195,7 @@ So sánh 2 file mình viết trong `06-lab-complete/`:
 ### Exercise 4.1: API key (`04-api-gateway/develop`)
 
 - **Check ở đâu:** hàm `verify_api_key` (dòng 39–54) đọc header `X-API-Key` qua `APIKeyHeader(name="X-API-Key", auto_error=False)`, được inject vào `/ask` bằng `Depends(verify_api_key)` (dòng 70).
-- **Sai key:** thiếu key → **401**; có key nhưng sai → **403** (Part 6 yêu cầu cả hai trường hợp đều 401, mình đã làm như vậy trong `06-lab-complete/app/auth.py`).
+- **Sai key:** thiếu key → **401**; có key nhưng sai → **403**.
 - **Rotate key:** key đọc từ env `AGENT_API_KEY`, nên đổi biến môi trường trên platform rồi restart/redeploy là xong, không sửa code. Để không làm gián đoạn client, nên hỗ trợ **nhiều key cùng lúc** trong thời gian chuyển đổi (vd `AGENT_API_KEYS=old,new`), báo client đổi sang key mới rồi mới xoá key cũ; lưu key trong secret manager và so sánh bằng `secrets.compare_digest`.
 
 ```text

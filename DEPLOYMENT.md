@@ -1,7 +1,5 @@
 # Deployment Information
 
-> Agent được deploy là agent Part 6 trong `06-lab-complete/` (đạt `PASS 12/12`), kèm một Render Key Value (Redis-compatible) cùng region.
-
 ## Public URL
 
 https://day14-agent-43am.onrender.com
@@ -10,9 +8,7 @@ https://day14-agent-43am.onrender.com
 
 **Render** (gói Free, region Singapore), build từ `06-lab-complete/Dockerfile`, cấu hình tương ứng `06-lab-complete/render.yaml`.
 
-> Lúc đầu định dùng Railway (`railway.toml` vẫn giữ trong repo), nhưng tài khoản Railway đã hết trial ("Your trial has expired. Please select a plan to continue using Railway") nên chuyển sang Render, theo RUBRIC chọn Railway hoặc Render đều được.
->
-> Gói Free của Render cho web service ngủ sau ~15 phút không có traffic; request đầu tiên sau đó mất khoảng 30–60 giây để khởi động lại (cold start). Nếu lệnh test đầu tiên bị timeout, chờ một lúc rồi chạy lại.
+Gói Free: service ngủ khi không có traffic, request đầu tiên có thể mất ~50 giây.
 
 ## Cách deploy
 

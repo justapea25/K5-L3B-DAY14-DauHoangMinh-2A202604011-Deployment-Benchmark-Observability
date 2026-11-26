@@ -31,7 +31,7 @@ Nguồn số liệu: `reports/*.json` (load test, eval) và `benchmark-results/*
 | 50 | 109.44 | 192.8 | 270.6 | 1702.3 | 1.67 % | ✅ PASS |
 | 100 | 61.49 | 357.6 | 3502.4 | 3782.8 | 0.33 % | ❌ FAIL (p95) |
 
-**Nhận xét:** Từ 1 → 10 → 50, RPS tăng gần tuyến tính (4,4 → 37,5 → 109,4, tức ~8,4× rồi ~2,9×) trong khi p50 gần như đứng yên ~190 ms. Lý do: mỗi request chủ yếu là *chờ* (`asyncio.sleep` mô phỏng LLM), event loop xử lý song song được nhiều request đang chờ, nên thêm concurrency là thêm throughput. Ở 100, RPS **giảm** còn 61,5 và p50 tăng gần gấp đôi, p95 vọt lên 3,5 s: agent chạy 1 process, 1 event loop; khi có 100 request cùng lúc, thời gian CPU cho phần đồng bộ (parse JSON, Pydantic, ghi log, cập nhật metrics) bắt đầu xếp hàng, cộng với load generator chạy trên cùng máy tranh CPU. Đây là điểm bão hoà: muốn tăng tiếp phải chạy nhiều worker/instance chứ không phải đẩy thêm concurrency. Lưu ý thêm: mỗi lần chạy chỉ 300 request, ở c=50 và c=100 thời lượng đo chỉ 2,7 s và 4,9 s nên số liệu ở hai mức này dao động khá nhiều giữa các lần chạy.
+**Nhận xét:** Từ 1 → 10 → 50, RPS tăng gần tuyến tính (4,4 → 37,5 → 109,4, tức ~8,4× rồi ~2,9×) trong khi p50 gần như đứng yên ~190 ms. Lý do: mỗi request chủ yếu là *chờ* (`asyncio.sleep` mô phỏng LLM), event loop xử lý song song được nhiều request đang chờ, nên thêm concurrency là thêm throughput. Ở 100, RPS **giảm** còn 61,5 và p50 tăng gần gấp đôi, p95 vọt lên 3,5 s: agent chạy 1 process, 1 event loop; khi có 100 request cùng lúc, thời gian CPU cho phần đồng bộ (parse JSON, Pydantic, ghi log, cập nhật metrics) bắt đầu xếp hàng, cộng với load generator chạy trên cùng máy tranh CPU. Đây là điểm bão hoà: muốn tăng tiếp phải chạy nhiều worker/instance chứ không phải đẩy thêm concurrency.
 
 ### 2.2 Tail latency
 
@@ -80,9 +80,7 @@ Trước khi thêm, mình grep `golden_dataset.jsonl` để chắc chắn các t
 
 ## 4. Observability stack (production)
 
-Stack chạy bằng `docker compose -p k5-day14-observability up -d --build`. Grafana map sang cổng **3001** vì cổng 3000 trên máy đang có ứng dụng khác (dùng file override `ports: !override ["3001:3000"]`, không sửa `docker-compose.yml`). Unit test alert rules: `promtool test rules /p/alert_rules_test.yml` → `SUCCESS`.
-
-> **Lỗi có sẵn trong Dockerfile của stack đã phải sửa:** container agent crash với `ModuleNotFoundError: No module named 'uvicorn'`. User `agent` được tạo với home `/app` (`useradd -d /app`), nên user-site của Python là `/app/.local`, trong khi package được copy vào `/home/agent/.local`. Thêm `ENV PYTHONUSERBASE=/home/agent/.local` thì chạy được.
+Unit test alert rules: `promtool test rules /p/alert_rules_test.yml` → `SUCCESS`.
 
 ### 4.1 Screenshot
 
@@ -106,7 +104,7 @@ Cách làm: Locust 30 user chạy nền; lúc 14:58:44 áp dụng **A** (recreat
 14:57:42 locust 30 users started
 14:58:44 [A] MOCK_ERROR_RATE=0.2 applied (agents recreated)
 14:58:59 [D] docker pause k5-day14-observability-agent-1
-14:58:59 LLMCostBurnRateHigh -> firing (activeAt=07:50:27Z)  | đã firing từ trước (xem ghi chú)
+14:58:59 LLMCostBurnRateHigh -> firing (activeAt=07:50:27Z)  | đã firing từ trước, do tải 100 user ở benchmark scaling
 14:59:09 AgentInstanceDown   -> pending (activeAt=07:59:07Z) | +10s since D
 14:59:19 AgentHighErrorRate  -> pending (activeAt=07:59:17Z) | +35s since A
 14:59:40 AgentInstanceDown   -> firing                        | +41s since D
@@ -125,7 +123,7 @@ Cách làm: Locust 30 user chạy nền; lúc 14:58:44 áp dụng **A** (recreat
 
 **Vì sao thời gian tới firing khác nhau:** thời gian ≈ thời gian để điều kiện thành đúng + `for` + chu kỳ đánh giá/scrape. D chỉ cần 1–2 lần scrape thất bại rồi `for: 30s` → 41 s. A phải chờ agent được recreate, `rate(...[1m])` tích luỹ đủ lỗi để vượt 5 % (35 s), rồi thêm `for: 1m` → 96 s.
 
-**Ghi chú về D:** dùng `pause` chứ không `stop`, vì container bị stop biến mất khỏi Docker DNS nên Prometheus coi như target không tồn tại (không phải "down") và không có alert. Ngoài ra, request đang nằm trong instance bị pause bị treo: trong Jaeger có 1 trace `POST /ask` dài **109,5 s** (`ff32d062a7e3e768eb80d5c150111ca8`), chính là request bị kẹt suốt thời gian pause rồi mới xong khi unpause. Phía client, Nginx hết `proxy_read_timeout` sẽ trả 504 cho các request này, nhưng metric của agent không đếm chúng (request chưa được agent xử lý xong), nên panel Error rate không phản ánh. Lượt Locust trong thí nghiệm này mình không lưu CSV nên không có số 504 cụ thể.
+**Về thí nghiệm D:** dùng `pause` chứ không `stop`, vì container bị stop biến mất khỏi Docker DNS nên Prometheus coi như target không tồn tại (không phải "down") và không có alert. Ngoài ra, request đang nằm trong instance bị pause bị treo: trong Jaeger có 1 trace `POST /ask` dài **109,5 s** (`ff32d062a7e3e768eb80d5c150111ca8`), chính là request bị kẹt suốt thời gian pause rồi mới xong khi unpause. Phía client, Nginx hết `proxy_read_timeout` sẽ trả 504 cho các request này, nhưng metric của agent không đếm chúng (request chưa được agent xử lý xong), nên panel Error rate không phản ánh.
 
 **Thí nghiệm E không làm alert nào firing. Bạn sẽ phát hiện loại sự cố này trong production bằng cách nào?**
 
